@@ -3,7 +3,7 @@
 //! 统一处理流式和非流式 API 响应
 
 use super::{
-    content_encoding::{decompress_body, get_content_encoding},
+    content_encoding::{decompress_body, get_content_encoding, is_supported_content_encoding},
     forwarder::ActiveConnectionGuard,
     handler_config::{StreamUsageEventFilter, UsageParserConfig},
     handler_context::{RequestContext, StreamingTimeoutConfig},
@@ -109,15 +109,19 @@ pub(crate) async fn read_decoded_body(
     let mut decoded = false;
 
     if let Some(encoding) = get_content_encoding(&headers) {
-        log::debug!("[{tag}] 解压非流式响应: content-encoding={encoding}");
-        match decompress_body(&encoding, &raw_bytes) {
-            Ok(decompressed) => {
-                body_bytes = Bytes::from(decompressed);
-                decoded = true;
+        if is_supported_content_encoding(&encoding) {
+            log::debug!("[{tag}] 解压非流式响应: content-encoding={encoding}");
+            match decompress_body(&encoding, &raw_bytes) {
+                Ok(decompressed) => {
+                    body_bytes = Bytes::from(decompressed);
+                    decoded = true;
+                }
+                Err(e) => {
+                    log::warn!("[{tag}] 解压失败 ({encoding}): {e}，使用原始数据");
+                }
             }
-            Err(e) => {
-                log::warn!("[{tag}] 解压失败 ({encoding}): {e}，使用原始数据");
-            }
+        } else {
+            log::warn!("[{tag}] 未知的 content-encoding: {encoding}，保留原始响应体和编码头");
         }
     }
 
